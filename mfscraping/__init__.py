@@ -115,16 +115,7 @@ class MFScraper:
         ret = sorted(ret, key=lambda x: (x["date"], x["transaction_id"]), reverse=True)
         return ret
 
-    def save(
-        self,
-        date,
-        price,
-        account,
-        l_category="未分類",
-        m_category="未分類",
-        memo="",
-        is_transfer=False,
-    ):
+    def get_category(self):
         result = self._session.get("https://moneyforward.com/cf")
         soup = BS(result.content, "html.parser")
         categories = {}
@@ -139,6 +130,21 @@ class MFScraper:
                 d.update({"id": int(tmp["id"])})
                 d_pm.update({tmp.text: d})
             categories.update({key: d_pm})
+        return categories
+
+    def save(
+        self,
+        date,
+        price,
+        account,
+        l_category="未分類",
+        m_category="未分類",
+        memo="",
+        is_transfer=False,
+    ):
+        result = self._session.get("https://moneyforward.com/cf")
+        soup = BS(result.content, "html.parser")
+        categories = self.get_category()
         tmp = soup.select_one("#user_asset_act_sub_account_id_hash")
         token = soup.select_one("meta[name=csrf-token]")["content"]
         headers = {
@@ -147,7 +153,7 @@ class MFScraper:
             "X-Requested-With": "XMLHttpRequest",
         }
         date_str = date.strftime("%Y/%m/%d")
-        accounts = {ac.text.split()[0]: ac["value"] for ac in tmp.find_all("option")}
+        accounts = {ac.text.split()[0]: ac["value"] for ac in tmp.select("option")}
         post_data = {
             "user_asset_act[updated_at]": date_str,
             "user_asset_act[recurring_flag]": 0,
