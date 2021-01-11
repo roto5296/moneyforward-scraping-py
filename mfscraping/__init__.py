@@ -115,6 +115,30 @@ class MFScraper:
         ret = sorted(ret, key=lambda x: (x["date"], x["transaction_id"]), reverse=True)
         return ret
 
+    def get_account(self):
+        result = self._session.get("https://moneyforward.com")
+        soup = BS(result.content, "html.parser")
+        accounts = {}
+        for a in soup.select("#registered-manual-accounts li.account a[href^='/accounts/show']"):
+            accounts.update(
+                {
+                    a.text: {
+                        "is_editable": True,
+                        "moneyforward_id": a["href"].replace("/accounts/show_manual/", ""),
+                    }
+                }
+            )
+        for a in soup.select("#registered-accounts li.account a[href^='/accounts/show']"):
+            accounts.update(
+                {
+                    a.text: {
+                        "is_editable": False,
+                        "moneyforward_id": a["href"].replace("/accounts/show/", ""),
+                    }
+                }
+            )
+        return accounts
+
     def get_category(self):
         result = self._session.get("https://moneyforward.com/cf")
         soup = BS(result.content, "html.parser")
@@ -145,7 +169,6 @@ class MFScraper:
         result = self._session.get("https://moneyforward.com/cf")
         soup = BS(result.content, "html.parser")
         categories = self.get_category()
-        tmp = soup.select_one("#user_asset_act_sub_account_id_hash")
         token = soup.select_one("meta[name=csrf-token]")["content"]
         headers = {
             "Accept": "text/javascript",
@@ -153,7 +176,7 @@ class MFScraper:
             "X-Requested-With": "XMLHttpRequest",
         }
         date_str = date.strftime("%Y/%m/%d")
-        accounts = {ac.text.split()[0]: ac["value"] for ac in tmp.select("option")}
+        accounts = self.get_account()
         post_data = {
             "user_asset_act[updated_at]": date_str,
             "user_asset_act[recurring_flag]": 0,
@@ -163,8 +186,8 @@ class MFScraper:
         }
         try:
             if is_transfer:
-                ac_id_from = accounts[account[0]]
-                ac_id_to = accounts[account[1]]
+                ac_id_from = accounts[account[0]]["moneyforward_id"]
+                ac_id_to = accounts[account[1]]["moneyforward_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 1,
                     "user_asset_act[sub_account_id_hash_from]": ac_id_from,
@@ -180,7 +203,7 @@ class MFScraper:
                     is_income = 0
                     l_c_id = categories["minus"][l_category]["id"]
                     m_c_id = categories["minus"][l_category][m_category]["id"]
-                ac_id = accounts[account]
+                ac_id = accounts[account]["moneyforward_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 0,
                     "user_asset_act[is_income]": is_income,
