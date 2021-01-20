@@ -5,75 +5,104 @@ import urllib
 
 import requests
 from bs4 import BeautifulSoup as BS
+from requests.exceptions import HTTPError, Timeout
+
+from .exceptions import DataDoesNotExist, FetchTimeout, LoginFailed, MFConnectionError
 
 
 class MFScraper:
-    def __init__(self, id, passwd):
+    def __init__(self, id, passwd, timeout=10):
         self._id = id
         self._passwd = passwd
         self._session = requests.session()
+        self._timeout = timeout
 
     def login(self):
-        result = self._session.get("https://moneyforward.com/sign_in/")
-        qs = urllib.parse.urlparse(result.url).query
-        qs_d = urllib.parse.parse_qs(qs)
-        soup = BS(result.content, "html.parser")
-        token = soup.find("meta", {"name": "csrf-token"})["content"]
-        post_data = {
-            "authenticity_token": token,
-            "_method": "post",
-            "mfid_user[email]": self._id,
-            "mfid_user[password]": self._passwd,
-            "select_account": "true",
-        }
-        post_data.update(qs_d)
-        result = self._session.post("https://id.moneyforward.com/sign_in", data=post_data)
-        if result.url == "https://moneyforward.com/" and result.status_code == 200:
-            return True
-        else:
-            return False
+        try:
+            result = self._session.get("https://moneyforward.com/sign_in/", timeout=self._timeout)
+            result.raise_for_status()
+            qs = urllib.parse.urlparse(result.url).query
+            qs_d = urllib.parse.parse_qs(qs)
+            soup = BS(result.content, "html.parser")
+            token = soup.find("meta", {"name": "csrf-token"})["content"]
+            post_data = {
+                "authenticity_token": token,
+                "_method": "post",
+                "mfid_user[email]": self._id,
+                "mfid_user[password]": self._passwd,
+                "select_account": "true",
+            }
+            post_data.update(qs_d)
+            result = self._session.post(
+                "https://id.moneyforward.com/sign_in", data=post_data, timeout=self._timeout
+            )
+            result.raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+        if result.url != "https://moneyforward.com/":
+            raise LoginFailed
 
     def fetch(self, delay=2, maxwaiting=300):
-        result = self._session.get("https://moneyforward.com")
-        soup = BS(result.content, "html.parser")
-        urls = soup.select("a[data-remote=true]")
-        urls = [url["href"] for url in urls]
-        token = soup.select_one("meta[name=csrf-token]")["content"]
-        headers = {
-            "Accept": "text/javascript",
-            "X-CSRF-Token": token,
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        self._results = []
-        for url in urls:
-            self._session.post("https://moneyforward.com" + url, headers=headers)
-        counter = 0
-        while counter < maxwaiting:
-            time.sleep(delay)
-            counter += delay
-            result = self._session.get("https://moneyforward.com/accounts/polling")
-            if not result.json()["loading"]:
-                return True
-        return False
+        try:
+            result = self._session.get("https://moneyforward.com", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            urls = soup.select("a[data-remote=true]")
+            urls = [url["href"] for url in urls]
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            self._results = []
+            for url in urls:
+                self._session.post(
+                    "https://moneyforward.com" + url, headers=headers, timeout=self._timeout
+                ).raise_for_status()
+            counter = 0
+            while counter < maxwaiting:
+                time.sleep(delay)
+                counter += delay
+                result = self._session.get(
+                    "https://moneyforward.com/accounts/polling", timeout=self._timeout
+                )
+                result.raise_for_status()
+                if not result.json()["loading"]:
+                    return
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+        raise FetchTimeout
 
     def get(self, year, month):
-        result = self._session.get("https://moneyforward.com")
-        soup = BS(result.content, "html.parser")
-        token = soup.select_one("meta[name=csrf-token]")["content"]
-        headers = {
-            "Accept": "text/javascript",
-            "X-CSRF-Token": token,
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        post_data = {
-            "from": str(year) + "/" + str(month) + "/1",
-            "service_id": "",
-            "account_id_hash": "",
-        }
-        result = self._session.post(
-            "https://moneyforward.com/cf/fetch", data=post_data, headers=headers
-        )
-        html = re.search(r'\$\("\.list_body"\)\.append\((.*?)\);', result.text).group(1)
+        try:
+            result = self._session.get("https://moneyforward.com", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            post_data = {
+                "from": str(year) + "/" + str(month) + "/1",
+                "service_id": "",
+                "account_id_hash": "",
+            }
+            result = self._session.post(
+                "https://moneyforward.com/cf/fetch",
+                data=post_data,
+                headers=headers,
+                timeout=self._timeout,
+            )
+            result.raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+        search_result = re.search(r'\$\("\.list_body"\)\.append\((.*?)\);', result.text)
+        if search_result is None:
+            raise DataDoesNotExist
+        html = search_result.group(1)
         html = eval(html).replace("\\", "")
         soup = BS(html, "html.parser")
         trs = soup.select("tr")
@@ -116,7 +145,11 @@ class MFScraper:
         return ret
 
     def get_account(self):
-        result = self._session.get("https://moneyforward.com")
+        try:
+            result = self._session.get("https://moneyforward.com", timeout=self._timeout)
+            result.raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
         soup = BS(result.content, "html.parser")
         accounts = {}
         for a in soup.select("#registered-manual-accounts li.account a[href^='/accounts/show']"):
@@ -140,7 +173,11 @@ class MFScraper:
         return accounts
 
     def get_category(self):
-        result = self._session.get("https://moneyforward.com/cf")
+        try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
         soup = BS(result.content, "html.parser")
         categories = {}
         css_list = ["ul.dropdown-menu.main_menu.plus", "ul.dropdown-menu.main_menu.minus"]
@@ -166,25 +203,26 @@ class MFScraper:
         memo="",
         is_transfer=False,
     ):
-        result = self._session.get("https://moneyforward.com/cf")
-        soup = BS(result.content, "html.parser")
-        categories = self.get_category()
-        token = soup.select_one("meta[name=csrf-token]")["content"]
-        headers = {
-            "Accept": "text/javascript",
-            "X-CSRF-Token": token,
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        date_str = date.strftime("%Y/%m/%d")
-        accounts = self.get_account()
-        post_data = {
-            "user_asset_act[updated_at]": date_str,
-            "user_asset_act[recurring_flag]": 0,
-            "user_asset_act[amount]": abs(price),
-            "user_asset_act[content]": memo,
-            "commit": "保存する",
-        }
         try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            categories = self.get_category()
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            date_str = date.strftime("%Y/%m/%d")
+            accounts = self.get_account()
+            post_data = {
+                "user_asset_act[updated_at]": date_str,
+                "user_asset_act[recurring_flag]": 0,
+                "user_asset_act[amount]": abs(price),
+                "user_asset_act[content]": memo,
+                "commit": "保存する",
+            }
             if is_transfer:
                 ac_id_from = accounts[account[0]]["moneyforward_id"]
                 ac_id_to = accounts[account[1]]["moneyforward_id"]
@@ -212,9 +250,11 @@ class MFScraper:
                     "user_asset_act[middle_category_id]": m_c_id,
                 }
                 post_data.update(post_data_add)
-        except BaseException:
-            return False
-        result = self._session.post(
-            "https://moneyforward.com/cf/create", data=post_data, headers=headers
-        )
-        return True
+            self._session.post(
+                "https://moneyforward.com/cf/create",
+                data=post_data,
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
