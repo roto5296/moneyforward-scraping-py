@@ -170,6 +170,11 @@ class MFScraper:
                     }
                 }
             )
+        for a in soup.select("#user_asset_act_sub_account_id_hash option"):
+            try:
+                accounts[a.text.strip(" ")]["edit_id"] = a["value"]
+            except KeyError:
+                continue
         return accounts
 
     def get_category(self):
@@ -224,8 +229,8 @@ class MFScraper:
                 "commit": "保存する",
             }
             if is_transfer:
-                ac_id_from = accounts[account[0]]["moneyforward_id"]
-                ac_id_to = accounts[account[1]]["moneyforward_id"]
+                ac_id_from = accounts[account[0]]["edit_id"]
+                ac_id_to = accounts[account[1]]["edit_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 1,
                     "user_asset_act[sub_account_id_hash_from]": ac_id_from,
@@ -241,7 +246,7 @@ class MFScraper:
                     is_income = 0
                     l_c_id = categories["minus"][l_category]["id"]
                     m_c_id = categories["minus"][l_category][m_category]["id"]
-                ac_id = accounts[account]["moneyforward_id"]
+                ac_id = accounts[account]["edit_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 0,
                     "user_asset_act[is_income]": is_income,
