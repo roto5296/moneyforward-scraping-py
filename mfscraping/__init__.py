@@ -263,3 +263,172 @@ class MFScraper:
             ).raise_for_status()
         except (Timeout, HTTPError) as e:
             raise MFConnectionError(e)
+
+    def update(
+        self,
+        id,
+        date,
+        content,
+        price,
+        account,
+        l_category="未分類",
+        m_category="未分類",
+        memo="",
+    ):
+        try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            categories = self.get_category()
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            date_str = date.strftime("%Y/%m/%d")
+            accounts = self.get_account()
+            put_data = {
+                "user_asset_act[id]": id,
+                "original_amount": 0,
+                "user_asset_act[table_name]": "user_asset_act",
+                "user_asset_act[updated_at]": date_str,
+                "user_asset_act[is_target]": 1,
+                "user_asset_act[amount]": abs(price),
+                "user_asset_act[content]": content,
+                "user_asset_act[memo]": memo,
+            }
+            if price > 0:
+                is_income = 1
+                l_c_id = categories["plus"][l_category]["id"]
+                m_c_id = categories["plus"][l_category][m_category]["id"]
+            else:
+                is_income = 0
+                l_c_id = categories["minus"][l_category]["id"]
+                m_c_id = categories["minus"][l_category][m_category]["id"]
+            ac_id = accounts[account]["edit_id"]
+            put_data_add = {
+                "user_asset_act[is_income]": is_income,
+                "user_asset_act[sub_account_id_hash]": ac_id,
+                "user_asset_act[large_category_id]": l_c_id,
+                "user_asset_act[middle_category_id]": m_c_id,
+            }
+            put_data.update(put_data_add)
+            self._session.put(
+                "https://moneyforward.com/cf/update",
+                params=put_data,
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+
+    def transfer(self, id, partner_account, partner_sub_account=None, partner_id=None):
+        try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            self._session.put(
+                "https://moneyforward.com/cf/update.js",
+                params={"change_type": "enable_transfer", "id": id},
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+            result = self._session.post(
+                "https://moneyforward.com/cf/fetch_transfer",
+                data={"user_asset_act_id": id},
+                headers=headers,
+                timeout=self._timeout,
+            )
+            result.raise_for_status()
+            search_result = re.search(r"\.html\((.*?)\);", result.text)
+            html = search_result.group(1)
+            html = eval(html).replace("\\", "")
+            soup = BS(html, "html.parser")
+            options = soup.select("option")
+            ac_list = {}
+            for option in options:
+                ac_list.update({option.text: option["value"]})
+            ac_id = ac_list[partner_account]
+            result = self._session.post(
+                "https://moneyforward.com/cf/fetch_transfer",
+                data={"user_asset_act_id": id, "account_id_hash": ac_id},
+                headers=headers,
+                timeout=self._timeout,
+            )
+            result.raise_for_status()
+            search_result = re.search(r"\.html\((.*?)\);", result.text)
+            html = search_result.group(1)
+            html = eval(html).replace("\\", "")
+            soup = BS(html, "html.parser")
+            tmp = soup.select_one("#user_asset_act_partner_sub_account_id_hash")
+            if tmp.has_attr("value"):
+                sub_ac_id = tmp["value"]
+            else:
+                options = soup.select("option")
+                sub_ac_list = {}
+                for option in options:
+                    sub_ac_list.update({option.text: option["value"]})
+                sub_ac_id = sub_ac_list[partner_sub_account]
+            post_data = {
+                "_method": "put",
+                "user_asset_act[id]": id,
+                "user_asset_act[partner_account_id_hash]": ac_id,
+                "user_asset_act[partner_sub_account_id_hash]": sub_ac_id,
+                "commit": "設定を保存",
+            }
+            if partner_id is not None:
+                post_data.update({"user_asset_act[partner_act_id]": partner_id})
+            self._session.post(
+                "https://moneyforward.com/cf/update",
+                data=post_data,
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+
+    def disable_transfer(self, id):
+        try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            self._session.put(
+                "https://moneyforward.com/cf/update.js",
+                params={"change_type": "disable_transfer", "id": id},
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
+
+    def delete(self, id):
+        try:
+            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+            result.raise_for_status()
+            soup = BS(result.content, "html.parser")
+            token = soup.select_one("meta[name=csrf-token]")["content"]
+            headers = {
+                "Accept": "text/javascript",
+                "X-CSRF-Token": token,
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            self._session.delete(
+                "https://moneyforward.com/cf/" + str(id),
+                headers=headers,
+                timeout=self._timeout,
+            ).raise_for_status()
+        except (Timeout, HTTPError) as e:
+            raise MFConnectionError(e)
