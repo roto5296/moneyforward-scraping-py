@@ -267,13 +267,13 @@ class MFScraper:
     def update(
         self,
         id,
-        date,
-        content,
         price,
-        account,
-        l_category="未分類",
-        m_category="未分類",
-        memo="",
+        date=None,
+        content=None,
+        account=None,
+        l_category=None,
+        m_category=None,
+        memo=None,
     ):
         try:
             result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
@@ -286,34 +286,37 @@ class MFScraper:
                 "X-CSRF-Token": token,
                 "X-Requested-With": "XMLHttpRequest",
             }
-            date_str = date.strftime("%Y/%m/%d")
             accounts = self.get_account()
             put_data = {
                 "user_asset_act[id]": id,
-                "original_amount": 0,
                 "user_asset_act[table_name]": "user_asset_act",
-                "user_asset_act[updated_at]": date_str,
-                "user_asset_act[is_target]": 1,
-                "user_asset_act[amount]": abs(price),
-                "user_asset_act[content]": content,
-                "user_asset_act[memo]": memo,
             }
+            if date is not None:
+                date_str = date.strftime("%Y/%m/%d")
+                put_data.update({"user_asset_act[updated_at]": date_str})
+            if price is not None:
+                put_data.update({"user_asset_act[amount]": price})
+            if content is not None:
+                put_data.update({"user_asset_act[content]": content})
+            if memo is not None:
+                put_data.update({"user_asset_act[memo]": memo})
             if price > 0:
                 is_income = 1
-                l_c_id = categories["plus"][l_category]["id"]
-                m_c_id = categories["plus"][l_category][m_category]["id"]
             else:
                 is_income = 0
-                l_c_id = categories["minus"][l_category]["id"]
-                m_c_id = categories["minus"][l_category][m_category]["id"]
-            ac_id = accounts[account]["edit_id"]
-            put_data_add = {
-                "user_asset_act[is_income]": is_income,
-                "user_asset_act[sub_account_id_hash]": ac_id,
-                "user_asset_act[large_category_id]": l_c_id,
-                "user_asset_act[middle_category_id]": m_c_id,
-            }
-            put_data.update(put_data_add)
+            put_data.update({"user_asset_act[is_income]": is_income})
+            if l_category is not None and m_category is not None:
+                if price > 0:
+                    l_c_id = categories["plus"][l_category]["id"]
+                    m_c_id = categories["plus"][l_category][m_category]["id"]
+                else:
+                    l_c_id = categories["minus"][l_category]["id"]
+                    m_c_id = categories["minus"][l_category][m_category]["id"]
+                put_data.update({"user_asset_act[large_category_id]": l_c_id})
+                put_data.update({"user_asset_act[middle_category_id]": m_c_id})
+            if account is not None:
+                ac_id = accounts[account]["edit_id"]
+                put_data.update({"user_asset_act[sub_account_id_hash]": ac_id})
             self._session.put(
                 "https://moneyforward.com/cf/update",
                 params=put_data,
