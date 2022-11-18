@@ -121,24 +121,19 @@ class MFScraper:
                 sel.clear()
             if is_transfer:
                 to = td_calc.select_one("div.transfer_account_box").extract()
-                account_to = to.text.replace("\n", "")
-                account_from = td_calc.text.replace("\n", "")
-            elif amount > 0:
-                account_to = td_calc.text.replace("\n", "")
-                account_from = None
+                account = [to.text.replace("\n", ""), td_calc.text.replace("\n", "")]
             else:
-                account_to = None
-                account_from = td_calc.text.replace("\n", "")
+                account = td_calc.text.replace("\n", "")
             transaction = {
                 "transaction_id": transaction_id,
                 "date": date,
-                "amount": abs(amount),
-                "account_from": account_from,
-                "account_to": account_to,
+                "amount": abs(amount) if is_transfer else amount,
+                "account": account,
                 "lcategory": tr.select_one("td.lctg").text.replace("\n", ""),
                 "mcategory": tr.select_one("td.mctg").text.replace("\n", ""),
                 "content": tr.select_one("td.content").text.replace("\n", ""),
                 "memo": tr.select_one("td.memo").text.replace("\n", ""),
+                "is_transfer": is_transfer,
             }
             ret.append(transaction)
         ret = sorted(ret, key=lambda x: (x["date"], x["transaction_id"]), reverse=True)
@@ -201,11 +196,11 @@ class MFScraper:
     def save(
         self,
         date,
-        price,
+        amount,
         account,
-        l_category="未分類",
-        m_category="未分類",
-        memo="",
+        lcategory="未分類",
+        mcategory="未分類",
+        content="",
         is_transfer=False,
     ):
         try:
@@ -224,8 +219,8 @@ class MFScraper:
             post_data = {
                 "user_asset_act[updated_at]": date_str,
                 "user_asset_act[recurring_flag]": 0,
-                "user_asset_act[amount]": abs(price),
-                "user_asset_act[content]": memo,
+                "user_asset_act[amount]": abs(amount),
+                "user_asset_act[content]": content,
                 "commit": "保存する",
             }
             if is_transfer:
@@ -238,14 +233,14 @@ class MFScraper:
                 }
                 post_data.update(post_data_add)
             else:
-                if price > 0:
+                if amount > 0:
                     is_income = 1
-                    l_c_id = categories["plus"][l_category]["id"]
-                    m_c_id = categories["plus"][l_category][m_category]["id"]
+                    l_c_id = categories["plus"][lcategory]["id"]
+                    m_c_id = categories["plus"][lcategory][mcategory]["id"]
                 else:
                     is_income = 0
-                    l_c_id = categories["minus"][l_category]["id"]
-                    m_c_id = categories["minus"][l_category][m_category]["id"]
+                    l_c_id = categories["minus"][lcategory]["id"]
+                    m_c_id = categories["minus"][lcategory][mcategory]["id"]
                 ac_id = accounts[account]["edit_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 0,
@@ -267,12 +262,12 @@ class MFScraper:
     def update(
         self,
         id,
-        price,
+        amount,
         date=None,
         content=None,
         account=None,
-        l_category=None,
-        m_category=None,
+        lcategory=None,
+        mcategory=None,
         memo=None,
     ):
         try:
@@ -294,24 +289,24 @@ class MFScraper:
             if date is not None:
                 date_str = date.strftime("%Y/%m/%d")
                 put_data.update({"user_asset_act[updated_at]": date_str})
-            if price is not None:
-                put_data.update({"user_asset_act[amount]": price})
+            if amount is not None:
+                put_data.update({"user_asset_act[amount]": amount})
             if content is not None:
                 put_data.update({"user_asset_act[content]": content})
             if memo is not None:
                 put_data.update({"user_asset_act[memo]": memo})
-            if price > 0:
+            if amount > 0:
                 is_income = 1
             else:
                 is_income = 0
             put_data.update({"user_asset_act[is_income]": is_income})
-            if l_category is not None and m_category is not None:
-                if price > 0:
-                    l_c_id = categories["plus"][l_category]["id"]
-                    m_c_id = categories["plus"][l_category][m_category]["id"]
+            if lcategory is not None and mcategory is not None:
+                if amount > 0:
+                    l_c_id = categories["plus"][lcategory]["id"]
+                    m_c_id = categories["plus"][lcategory][mcategory]["id"]
                 else:
-                    l_c_id = categories["minus"][l_category]["id"]
-                    m_c_id = categories["minus"][l_category][m_category]["id"]
+                    l_c_id = categories["minus"][lcategory]["id"]
+                    m_c_id = categories["minus"][lcategory][mcategory]["id"]
                 put_data.update({"user_asset_act[large_category_id]": l_c_id})
                 put_data.update({"user_asset_act[middle_category_id]": m_c_id})
             if account is not None:
