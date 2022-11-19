@@ -121,7 +121,7 @@ class MFScraper:
                 sel.clear()
             if is_transfer:
                 to = td_calc.select_one("div.transfer_account_box").extract()
-                account = [to.text.replace("\n", ""), td_calc.text.replace("\n", "")]
+                account = [td_calc.text.replace("\n", ""), to.text.replace("\n", "")]
             else:
                 account = td_calc.text.replace("\n", "")
             transaction = {
