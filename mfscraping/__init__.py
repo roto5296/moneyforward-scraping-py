@@ -261,7 +261,7 @@ class MFScraper:
 
     def update(
         self,
-        id,
+        transaction_id,
         amount,
         date=None,
         content=None,
@@ -283,7 +283,7 @@ class MFScraper:
             }
             accounts = self.get_account()
             put_data = {
-                "user_asset_act[id]": id,
+                "user_asset_act[id]": transaction_id,
                 "user_asset_act[table_name]": "user_asset_act",
             }
             if date is not None:
@@ -321,7 +321,7 @@ class MFScraper:
         except (Timeout, HTTPError) as e:
             raise MFConnectionError(e)
 
-    def transfer(self, id, partner_account, partner_sub_account=None, partner_id=None):
+    def transfer(self, transaction_id, partner_account, partner_sub_account=None, partner_id=None):
         try:
             result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
             result.raise_for_status()
@@ -334,13 +334,13 @@ class MFScraper:
             }
             self._session.put(
                 "https://moneyforward.com/cf/update.js",
-                params={"change_type": "enable_transfer", "id": id},
+                params={"change_type": "enable_transfer", "id": transaction_id},
                 headers=headers,
                 timeout=self._timeout,
             ).raise_for_status()
             result = self._session.post(
                 "https://moneyforward.com/cf/fetch_transfer",
-                data={"user_asset_act_id": id},
+                data={"user_asset_act_id": transaction_id},
                 headers=headers,
                 timeout=self._timeout,
             )
@@ -356,7 +356,7 @@ class MFScraper:
             ac_id = ac_list[partner_account]
             result = self._session.post(
                 "https://moneyforward.com/cf/fetch_transfer",
-                data={"user_asset_act_id": id, "account_id_hash": ac_id},
+                data={"user_asset_act_id": transaction_id, "account_id_hash": ac_id},
                 headers=headers,
                 timeout=self._timeout,
             )
@@ -376,7 +376,7 @@ class MFScraper:
                 sub_ac_id = sub_ac_list[partner_sub_account]
             post_data = {
                 "_method": "put",
-                "user_asset_act[id]": id,
+                "user_asset_act[id]": transaction_id,
                 "user_asset_act[partner_account_id_hash]": ac_id,
                 "user_asset_act[partner_sub_account_id_hash]": sub_ac_id,
                 "commit": "設定を保存",
@@ -392,7 +392,7 @@ class MFScraper:
         except (Timeout, HTTPError) as e:
             raise MFConnectionError(e)
 
-    def disable_transfer(self, id):
+    def disable_transfer(self, transaction_id):
         try:
             result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
             result.raise_for_status()
@@ -405,14 +405,14 @@ class MFScraper:
             }
             self._session.put(
                 "https://moneyforward.com/cf/update.js",
-                params={"change_type": "disable_transfer", "id": id},
+                params={"change_type": "disable_transfer", "id": transaction_id},
                 headers=headers,
                 timeout=self._timeout,
             ).raise_for_status()
         except (Timeout, HTTPError) as e:
             raise MFConnectionError(e)
 
-    def delete(self, id):
+    def delete(self, transaction_id):
         try:
             result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
             result.raise_for_status()
@@ -424,7 +424,7 @@ class MFScraper:
                 "X-Requested-With": "XMLHttpRequest",
             }
             self._session.delete(
-                "https://moneyforward.com/cf/" + str(id),
+                "https://moneyforward.com/cf/" + str(transaction_id),
                 headers=headers,
                 timeout=self._timeout,
             ).raise_for_status()
