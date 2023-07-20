@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mfscraping"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["roto5296 <hikun5296@gmail.com>"]
 
