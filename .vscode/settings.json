@@ -2,5 +2,11 @@
     "python.linting.pylintEnabled": false,
     "python.linting.pycodestyleEnabled": false,
     "python.linting.flake8Enabled": true,
-    "python.formatting.provider": "black",
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+
+    "black-formatter.args": [
+        "--line-length=99"
+    ]
 }
