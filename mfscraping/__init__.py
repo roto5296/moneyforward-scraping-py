@@ -16,6 +16,8 @@ class MFScraper:
         self._passwd = passwd
         self._session = requests.session()
         self._timeout = timeout
+        self._account = None
+        self._category = None
 
     def login(self):
         try:
@@ -140,58 +142,75 @@ class MFScraper:
         return ret
 
     def get_account(self):
-        try:
-            result = self._session.get("https://moneyforward.com", timeout=self._timeout)
-            result.raise_for_status()
-        except (Timeout, HTTPError) as e:
-            raise MFConnectionError(e)
-        soup = BS(result.content, "html.parser")
-        accounts = {}
-        for a in soup.select("#registered-manual-accounts li.account a[href^='/accounts/show']"):
-            accounts.update(
-                {
-                    a.text: {
-                        "is_editable": True,
-                        "moneyforward_id": a["href"].replace("/accounts/show_manual/", ""),
-                    }
-                }
-            )
-        for a in soup.select("#registered-accounts li.account a[href^='/accounts/show']"):
-            accounts.update(
-                {
-                    a.text: {
-                        "is_editable": False,
-                        "moneyforward_id": a["href"].replace("/accounts/show/", ""),
-                    }
-                }
-            )
-        for a in soup.select("#user_asset_act_sub_account_id_hash option"):
+        if not self._account:
             try:
-                accounts[a.text.strip(" ")]["edit_id"] = a["value"]
-            except KeyError:
-                continue
-        return accounts
+                result = self._session.get(
+                    "https://moneyforward.com/groups", timeout=self._timeout
+                )
+                result.raise_for_status()
+            except (Timeout, HTTPError) as e:
+                raise MFConnectionError(e)
+            soup = BS(result.content, "html.parser")
+            url = soup.select_one(".edit > a")["href"]
+            try:
+                result = self._session.get("https://moneyforward.com" + url, timeout=self._timeout)
+                result.raise_for_status()
+            except (Timeout, HTTPError) as e:
+                raise MFConnectionError(e)
+            soup = BS(result.content, "html.parser")
+            accounts = {}
+            for a in soup.select(".js-sub-account-group-parent"):
+                account_id = a["id"].replace("js-sub_account_split_", "")
+                sub_accounts = soup.select("." + re.sub("^([1-9])", "\\\\3\\1", account_id))
+                if sub_accounts:
+                    tmp = {}
+                    for sa in sub_accounts:
+                        if sa.has_attr("checked"):
+                            tmp.update(
+                                {
+                                    re.sub("^\\s|\\s$", "", sa.next_sibling.replace("\n", "")): {
+                                        "sub_account_id": sa["value"]
+                                    }
+                                }
+                            )
+                    if tmp:
+                        tmp.update({"account_id": account_id})
+                        accounts.update({a.next_sibling.replace("\n", ""): tmp})
+                else:
+                    if a.has_attr("checked"):
+                        accounts.update(
+                            {
+                                a.next_sibling.replace("\n", ""): {
+                                    "account_id": account_id,
+                                    "sub_account_id": a["value"],
+                                }
+                            }
+                        )
+                self._account = accounts
+        return self._account
 
     def get_category(self):
-        try:
-            result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
-            result.raise_for_status()
-        except (Timeout, HTTPError) as e:
-            raise MFConnectionError(e)
-        soup = BS(result.content, "html.parser")
-        categories = {}
-        css_list = ["ul.dropdown-menu.main_menu.plus", "ul.dropdown-menu.main_menu.minus"]
-        keys = ["plus", "minus"]
-        for (css, key) in zip(css_list, keys):
-            d_pm = {}
-            c_pm = soup.select_one(css)
-            for l_c in c_pm.select("li.dropdown-submenu"):
-                d = {m_c.text: {"id": int(m_c["id"])} for m_c in l_c.select("a.m_c_name")}
-                tmp = l_c.select_one("a.l_c_name")
-                d.update({"id": int(tmp["id"])})
-                d_pm.update({tmp.text: d})
-            categories.update({key: d_pm})
-        return categories
+        if not self._category:
+            try:
+                result = self._session.get("https://moneyforward.com/cf", timeout=self._timeout)
+                result.raise_for_status()
+            except (Timeout, HTTPError) as e:
+                raise MFConnectionError(e)
+            soup = BS(result.content, "html.parser")
+            categories = {}
+            css_list = ["ul.dropdown-menu.main_menu.plus", "ul.dropdown-menu.main_menu.minus"]
+            keys = ["plus", "minus"]
+            for css, key in zip(css_list, keys):
+                d_pm = {}
+                c_pm = soup.select_one(css)
+                for l_c in c_pm.select("li.dropdown-submenu"):
+                    d = {m_c.text: {"id": int(m_c["id"])} for m_c in l_c.select("a.m_c_name")}
+                    tmp = l_c.select_one("a.l_c_name")
+                    d.update({"id": int(tmp["id"])})
+                    d_pm.update({tmp.text: d})
+                categories.update({key: d_pm})
+            self._category = categories
+        return self._category
 
     def save(
         self,
@@ -224,8 +243,8 @@ class MFScraper:
                 "commit": "保存する",
             }
             if is_transfer:
-                ac_id_from = accounts[account[0]]["edit_id"]
-                ac_id_to = accounts[account[1]]["edit_id"]
+                ac_id_from = accounts[account[0]]["sub_account_id"]
+                ac_id_to = accounts[account[1]]["sub_account_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 1,
                     "user_asset_act[sub_account_id_hash_from]": ac_id_from,
@@ -241,7 +260,7 @@ class MFScraper:
                     is_income = 0
                     l_c_id = categories["minus"][lcategory]["id"]
                     m_c_id = categories["minus"][lcategory][mcategory]["id"]
-                ac_id = accounts[account]["edit_id"]
+                ac_id = accounts[account]["sub_account_id"]
                 post_data_add = {
                     "user_asset_act[is_transfer]": 0,
                     "user_asset_act[is_income]": is_income,
@@ -310,7 +329,7 @@ class MFScraper:
                 put_data.update({"user_asset_act[large_category_id]": l_c_id})
                 put_data.update({"user_asset_act[middle_category_id]": m_c_id})
             if account is not None:
-                ac_id = accounts[account]["edit_id"]
+                ac_id = accounts[account]["sub_account_id"]
                 put_data.update({"user_asset_act[sub_account_id_hash]": ac_id})
             self._session.put(
                 "https://moneyforward.com/cf/update",
@@ -338,47 +357,16 @@ class MFScraper:
                 headers=headers,
                 timeout=self._timeout,
             ).raise_for_status()
-            result = self._session.post(
-                "https://moneyforward.com/cf/fetch_transfer",
-                data={"user_asset_act_id": transaction_id},
-                headers=headers,
-                timeout=self._timeout,
-            )
-            result.raise_for_status()
-            search_result = re.search(r"\.html\((.*?)\);", result.text)
-            html = search_result.group(1)
-            html = eval(html).replace("\\", "")
-            soup = BS(html, "html.parser")
-            options = soup.select("option")
-            ac_list = {}
-            for option in options:
-                ac_list.update({option.text: option["value"]})
-            ac_id = ac_list[partner_account]
-            result = self._session.post(
-                "https://moneyforward.com/cf/fetch_transfer",
-                data={"user_asset_act_id": transaction_id, "account_id_hash": ac_id},
-                headers=headers,
-                timeout=self._timeout,
-            )
-            result.raise_for_status()
-            search_result = re.search(r"\.html\((.*?)\);", result.text)
-            html = search_result.group(1)
-            html = eval(html).replace("\\", "")
-            soup = BS(html, "html.parser")
-            tmp = soup.select_one("#user_asset_act_partner_sub_account_id_hash")
-            if tmp.has_attr("value"):
-                sub_ac_id = tmp["value"]
+            accounts = self.get_account()
+            if "sub_account_id" in accounts[partner_account]:
+                sai = accounts[partner_account]["sub_account_id"]
             else:
-                options = soup.select("option")
-                sub_ac_list = {}
-                for option in options:
-                    sub_ac_list.update({option.text: option["value"]})
-                sub_ac_id = sub_ac_list[partner_sub_account]
+                sai = accounts[partner_account][partner_sub_account]["sub_account_id"]
             post_data = {
                 "_method": "put",
                 "user_asset_act[id]": transaction_id,
-                "user_asset_act[partner_account_id_hash]": ac_id,
-                "user_asset_act[partner_sub_account_id_hash]": sub_ac_id,
+                "user_asset_act[partner_account_id_hash]": accounts[partner_account]["account_id"],
+                "user_asset_act[partner_sub_account_id_hash]": sai,
                 "commit": "設定を保存",
             }
             if partner_id is not None:
